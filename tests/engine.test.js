@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {calculate, theoreticalRPM, cuttingSpeed, selectStep, parseSteps,findRecommendation,validateRange} from '../engine.js';
+import {freshState,validateState} from '../storage.js';
+const close=(a,b)=>assert.ok(Math.abs(a-b)<1e-8,`${a} ≠ ${b}`);
+// Только синтетические профили для проверки арифметики; НЕ паспорта станков.
+const lathe={kind:'turning',rpm:[100,250,450,630,800],feeds:[.1,.2,.3],crossFeeds:[.05,.1],threadPitches:[1,1.5],minRPM:100,maxRPM:800};
+const mill={kind:'milling',rpm:[100,250,450,630],feeds:[40,63,80,100],minRPM:100,maxRPM:630};
+const turning={kind:'turning',operation:'turning',diameter:50,vc:100,depth:2,feed:.2,manualRPM:'',toolMaxRPM:1000};
+const milling={kind:'milling',operation:'end',diameter:20,vc:30,depth:2,width:10,teeth:4,feed:.05,manualRPM:'',toolMaxRPM:1000};
+test('Формула оборотов и обратный пересчёт скорости',()=>{close(theoreticalRPM(100,50),636.6197723675814);close(cuttingSpeed(theoreticalRPM(100,50),50),100);});
+test('Точение: ступень 630, скорость и минутная подача',()=>{const r=calculate(turning,lathe);assert.equal(r.rpm,630);close(r.vc,98.96016858807849);close(r.feedMinute,126);assert.equal(r.depth,2);});
+test('Фрезерование: подбор оборотов и подачи, фактическая fz',()=>{const r=calculate(milling,mill);assert.equal(r.rpm,450);assert.equal(r.feedMinute,80);close(r.feedTooth,80/(4*450));close(r.targetFeedMinute,90);close(r.vc,28.274333882308138);});
+test('Не превышать скорость: самая близкая нижняя ступень',()=>{assert.equal(selectStep(636,[800,630,450]),630);assert.equal(selectStep(630,[630,800]),630);assert.throws(()=>selectStep(90,[100,250]));});
+test('Ограничения инструмента и станка имеют приоритет',()=>{assert.equal(calculate({...turning,toolMaxRPM:500},lathe).rpm,450);assert.throws(()=>calculate({...turning,toolMaxRPM:80},lathe));assert.equal(calculate(turning,{...lathe,maxRPM:500}).rpm,450);});
+test('Ручная ступень не обходит ограничения',()=>{assert.throws(()=>calculate({...turning,manualRPM:800},lathe));assert.throws(()=>calculate({...turning,manualRPM:600},lathe));assert.equal(calculate({...turning,manualRPM:450},lathe).rpm,450);});
+test('Поперечная подача для торца, канавки и отрезки',()=>{for(const operation of ['facing','groove','parting'])assert.equal(calculate({...turning,operation},lathe).feedRev,.1);});
+test('Резьба: шаг синхронной подачи и предупреждение о проходах',()=>{const r=calculate({...turning,operation:'thread',feed:1.5},lathe);assert.equal(r.feedRev,1.5);assert.equal(r.feedMinute,945);assert.ok(r.warnings.some(w=>w.includes('проходов')));assert.throws(()=>calculate({...turning,operation:'thread',feed:1.25},lathe));});
+test('Отсутствие паспортных данных не маскируется',()=>{assert.throws(()=>calculate(turning,{...lathe,rpm:[]}));const r=calculate({...turning,manualRPM:450},{...lathe,rpm:[],feeds:[]});assert.equal(r.provisional,true);assert.ok(r.warnings.some(w=>w.includes('не заполнен')));});
+test('Без ступеней минутной подачи показывается целевая, не реальная',()=>{const r=calculate(milling,{...mill,feeds:[]});assert.equal(r.feedMinute,90);assert.equal(r.provisional,true);assert.ok(r.source.includes('не подтверждена'));});
+test('Невозможная подача не округляется вверх',()=>{assert.throws(()=>calculate({...milling,feed:.001},mill));assert.throws(()=>calculate({...turning,feed:.01},lathe));});
+test('Нулевые/отрицательные/нечисловые входные значения отвергаются',()=>{for(const key of ['diameter','vc','depth','feed'])for(const bad of [0,-1,NaN,Infinity,'abc',''])assert.throws(()=>calculate({...turning,[key]:bad},lathe));assert.throws(()=>calculate({...milling,teeth:2.5},mill));assert.throws(()=>calculate({...milling,width:21},mill));});
+test('Радиальная глубина точения не уничтожает весь диаметр',()=>assert.throws(()=>calculate({...turning,depth:25},lathe)));
+test('Десятичная запятая и независимые разделители ступеней',()=>{assert.deepEqual(parseSteps('0,1; 0,2\n0.1 0,05'),[.05,.1,.2]);assert.deepEqual(parseSteps(''),[]);assert.throws(()=>parseSteps('100;0'));assert.equal(calculate({...turning,feed:'0,2'},lathe).feedMinute,126);});
+test('Диапазон рекомендации требует точного совпадения всех условий выбора',()=>{const rule={kind:'turning',material:'st45',toolMaterial:'hss',operation:'turning',finish:'rough',toolType:'external'};assert.equal(findRecommendation([rule],rule),rule);assert.equal(findRecommendation([rule],{...rule,toolType:'boring'}),undefined);assert.equal(findRecommendation([rule],{...rule,finish:'finish'}),undefined);assert.throws(()=>validateRange(2,1,'Vc'));});
+test('Свежие данные и экспорт/импорт проходят проверку схемы',()=>{const s=freshState();assert.deepEqual(validateState(JSON.parse(JSON.stringify(s))),s);assert.equal(s.machines[0].rpm.length,0);});
+test('Повреждённые резервные копии и неверные диапазоны отвергаются',()=>{assert.throws(()=>validateState({}));const s=freshState();s.machines[0].rpm=[-1];assert.throws(()=>validateState(s));const t=freshState();t.rules=[{id:'x',kind:'turning',material:'st45',toolMaterial:'hss',operation:'turning',finish:'rough',toolType:'external',source:'',conditions:'',vc:[10,20],feed:[.1,.2],depth:[1,2]}];assert.throws(()=>validateState(t));});
+test('Детерминированность: повторный расчёт не меняет профиль и результат',()=>{const before=JSON.stringify(lathe);assert.deepEqual(calculate(turning,lathe),calculate(turning,lathe));assert.equal(JSON.stringify(lathe),before);});
+
+test('Неизвестная операция не подменяется обычным точением',()=>assert.throws(()=>calculate({...turning,operation:'unknown'},lathe)));
+test('Переполнение минутной подачи не выдаётся за режим',()=>assert.throws(()=>calculate({...turning,feed:1e308},{...lathe,feeds:[]})));

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#133d36"><meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="description" content="Режимы токарной и фрезерной обработки на станках с механическими коробками.">
+<link rel="manifest" href="./manifest.webmanifest"><link rel="icon" href="./icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="./icon-192.png">
+<link rel="stylesheet" href="./style.css"><title>Режим • Калькулятор резания</title>
+</head>
+<body>
+<header class="topbar"><a class="brand" href="#calculator"><span class="brand-icon">Р</span><span>РЕЖИМ<small>Мастерская точных расчётов</small></span></a><span id="offline-status" class="status">Локальные данные</span></header>
+<div class="layout">
+<aside><p class="eyebrow">РАБОЧИЙ СТОЛ</p><nav aria-label="Разделы приложения">
+<button data-page="calculator" class="active">◈ <span>Калькулятор</span></button>
+<button data-page="machines">⚙ <span>Мои станки</span></button>
+<button data-page="materials">▤ <span>Материалы</span></button>
+<button data-page="tools">⌁ <span>Инструменты</span></button>
+<button data-page="saved">☆ <span>Сохранённые режимы</span></button>
+<button data-page="history">↺ <span>История</span></button>
+<button data-page="help">ⓘ <span>Справка и данные</span></button>
+</nav><div class="aside-note"><span class="dot"></span> Для ручных станков<p>16К20 · 6Т80ШС<br>Механические скорости и подачи</p></div></aside>
+<main>
+<section id="page-calculator" class="page">
+<div class="page-heading"><div><p class="eyebrow">ОТ ПАРАМЕТРОВ К СТУПЕНИ СТАНКА</p><h1>Калькулятор режимов резания</h1><p class="subtitle">Точные формулы. Реальные ступени. Ваши условия работы.</p></div><span class="badge">мм · м/мин · об/мин</span></div>
+<div class="mode-switch" role="group" aria-label="Вид обработки"><button data-kind="turning" class="active">Токарная обработка <small>16К20</small></button><button data-kind="milling">Фрезерная обработка <small>6Т80ШС</small></button></div>
+<div id="machine-notice" class="notice"></div>
+<div class="calculator-grid"><form id="calc-form" class="card">
+<div class="card-heading"><h2>Параметры обработки</h2><span class="step-badge">01</span></div>
+<div class="form-grid">
+<label>Операция / тип фрезы<select id="operation" name="operation"></select><small>Определяет направление подачи и условия обработки.</small></label>
+<label>Характер обработки<select name="finish" id="finish"><option value="rough">Черновая</option><option value="finish">Чистовая</option></select><small>Учитывается при поиске справочных рекомендаций.</small></label>
+<label>Материал заготовки<select name="material" id="material"></select><small id="material-note"></small></label>
+<label>Материал инструмента<select id="tool-material" name="toolMaterial"></select><small>Марка сплава и покрытие уточняются в карточке инструмента.</small></label>
+<label id="tool-type-label">Тип резца<select name="toolType" id="tool-type"></select><small>Выбирайте инструмент для выбранной операции.</small></label>
+<label>Свой инструмент<select id="custom-tool"><option value="">Без сохранённого инструмента</option></select><small>Подставляет материал и предел оборотов.</small></label>
+</div>
+<div id="recommendation" class="reference-panel"></div>
+<div class="section-label">РАЗМЕРЫ И РЕЖИМ</div><div class="form-grid">
+<label><span id="diameter-label">Диаметр заготовки</span><div class="unit-field"><input name="diameter" id="diameter" type="text" inputmode="decimal" value="50" required><span>мм</span></div><small id="diameter-help">Диаметр в зоне контакта с режущей кромкой.</small></label>
+<label id="teeth-label" hidden>Количество зубьев<div class="unit-field"><input name="teeth" id="teeth" type="text" inputmode="numeric" value="4"><span>шт.</span></div><small>Число участвующих в работе зубьев фрезы.</small></label>
+<label>Скорость резания Vc<div class="unit-field"><input name="vc" id="vc" type="text" inputmode="decimal" placeholder="По данным инструмента" required><span>м/мин</span></div><small>Верхняя целевая скорость. Возьмите из каталога для вашей пары материал–инструмент.</small></label>
+<label><span id="feed-label">Подача f</span><div class="unit-field"><input name="feed" id="feed" type="text" inputmode="decimal" placeholder="Введите подачу" required><span id="feed-unit">мм/об</span></div><small id="feed-help">Перемещение резца за один оборот заготовки.</small></label>
+<label><span id="depth-label">Глубина резания ap</span><div class="unit-field"><input name="depth" id="depth" type="text" inputmode="decimal" placeholder="Введите глубину" required><span>мм</span></div><small id="depth-help">Радиальная глубина за проход; при точении уменьшение диаметра равно 2 × ap.</small></label>
+<label id="width-label" hidden>Ширина фрезерования ae<div class="unit-field"><input name="width" id="width" type="text" inputmode="decimal" value="10"><span>мм</span></div><small>Радиальное зацепление фрезы, не больше диаметра.</small></label>
+</div>
+<details class="adjustments"><summary>Ограничения и ручная корректировка</summary><div class="form-grid">
+<label>Обороты вручную<div class="unit-field"><input name="manualRPM" id="manual-rpm" type="text" inputmode="decimal" placeholder="Автоматический подбор"><span>об/мин</span></div><small>Только реальная ступень. Превышение Vc и пределов не допускается.</small></label>
+<label>Максимум инструмента<div class="unit-field"><input name="toolMaxRPM" id="tool-max-rpm" type="text" inputmode="decimal" placeholder="По паспорту инструмента"><span>об/мин</span></div><small>Ограничение всей сборки: инструмент, оправка и крепление.</small></label>
+</div></details>
+<div id="calc-error" class="error" role="alert" hidden></div><button type="submit" class="primary full">Рассчитать режим <span>→</span></button>
+<p class="fine-print">Без таблицы рекомендаций Vc, подача и глубина задаются вами. Расчёт не подтверждает допустимую нагрузку.</p>
+</form>
+<div class="results-column"><section class="result-card" aria-live="polite"><div class="card-heading"><h2>Режим на станке</h2><span class="step-badge">02</span></div><div id="results"><div class="empty-result"><div class="dial">↗</div><h3>Начнём с параметров</h3><p>Введите режим из каталога инструмента и проверьте профиль станка. Здесь появятся обороты, подача и фактическая скорость.</p></div></div></section>
+<div class="card compact"><p class="eyebrow">КАК ПОДБИРАЕТСЯ СТУПЕНЬ</p><p>Ближайшая доступная ступень <strong>не выше</strong> расчётного значения. Пределы станка и инструмента имеют приоритет.</p><div class="formula">n = 1000 · Vc / (π · D)</div><p class="fine-print">Для механической коробки скорость после подбора ступени пересчитывается.</p></div></div></div>
+</section>
+<section id="page-machines" class="page" hidden></section>
+<section id="page-materials" class="page" hidden></section>
+<section id="page-tools" class="page" hidden></section>
+<section id="page-saved" class="page" hidden></section>
+<section id="page-history" class="page" hidden></section>
+<section id="page-help" class="page" hidden></section>
+<footer>РЕЖИМ <span>Расчёт помогает выбрать настройки. Решение принимает оператор.</span></footer>
+</main></div><div id="toast" role="status" hidden></div>
+<script type="module" src="./app.js"></script>
+</body></html>

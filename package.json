@@ -1,0 +1,11 @@
+{
+  "name": "cutting-calculator",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Калькулятор режимов резания для ручных станков",
+  "scripts": {
+    "test": "node --test tests/engine.test.js",
+    "start": "python3 server.py"
+  }
+}
