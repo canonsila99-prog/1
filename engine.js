@@ -32,7 +32,8 @@ export function calculate(input, machine) {
   const allowedOperations=kind==='turning'?['turning','facing','boring','groove','parting','thread']:['end','face','disc','keyway','indexable'];
   if(!allowedOperations.includes(input.operation))throw new CalculationError('Неизвестная операция обработки.');
   const d = positive(input.diameter, 'Диаметр');
-  const vc = positive(input.vc, 'Скорость резания');
+  const direct = input.speedMode==='step';
+  const vc = direct ? cuttingSpeed(positive(input.manualRPM,'Выбранные обороты'),d) : positive(input.vc, 'Скорость резания');
   const ap = positive(input.depth, 'Глубина резания');
   const theoretical = theoreticalRPM(vc, d);
   const min = lowerLimit(machine.minRPM, 'Минимальные обороты');
@@ -45,7 +46,7 @@ export function calculate(input, machine) {
   let rpm;
   if (input.manualRPM !== '' && input.manualRPM != null) {
     rpm = positive(input.manualRPM, 'Ручные обороты');
-    if (rpm < min || rpm > max || rpm > theoretical*(1+1e-12)) throw new CalculationError('Ручные обороты превышают заданную скорость резания или выходят за ограничения станка/инструмента.');
+    if (rpm < min || rpm > max || (!direct && rpm > theoretical*(1+1e-12))) throw new CalculationError('Выбранные обороты превышают заданную скорость резания или выходят за ограничения станка/инструмента.');
     if (machine.rpm.length && !machine.rpm.includes(rpm)) throw new CalculationError('Ручные обороты должны совпадать с механической ступенью станка.');
   } else {
     if (!machine.rpm.length) throw new CalculationError('Заполните ступени оборотов в профиле станка либо укажите проверенные фактические обороты вручную.');
@@ -63,13 +64,15 @@ export function calculate(input, machine) {
     if (width > d) throw new CalculationError('Ширина фрезерования не может превышать диаметр фрезы.');
     feedTooth = positive(input.feed,'Подача на зуб');
     targetFeedMinute = feedTooth * teeth * rpm;
-    if (machine.feeds.length) {
-      feedMinute = selectStep(targetFeedMinute, machine.feeds);
+    const feedSteps=input.feedAxis==='vertical' ? (machine.verticalFeeds||[]) : machine.feeds;
+    if (feedSteps.length) {
+      feedMinute = selectStep(targetFeedMinute, feedSteps);
+      if(machine.referenceVersion===2 && machine.id==='6t80' && input.feedAxis!=='vertical' && feedMinute===325)warnings.push('Ступень 325 мм/мин перенесена из отраслевого каталога. Возможна опечатка вместо 315: перед применением сверьте табличку своего станка.');
       source = 'Механическая минутная подача';
     } else {
       feedMinute = targetFeedMinute;
       source = 'Целевая подача; ступень не подтверждена';
-      warnings.push('Заполните механические минутные подачи 6Т80ШС. Пока показана целевая подача; при ручном перемещении выдержать её точно нельзя.');
+      warnings.push('Заполните механические минутные подачи 6Т80. Пока показана целевая подача; при ручном перемещении выдержать её точно нельзя.');
     }
     feedTooth = feedMinute / (teeth * rpm);
     feedRev = feedMinute / rpm;
@@ -78,7 +81,8 @@ export function calculate(input, machine) {
   } else {
     const target = positive(input.feed, thread ? 'Шаг резьбы' : 'Подача на оборот');
     const cross = ['facing','groove','parting'].includes(input.operation);
-    const steps = thread ? (machine.threadPitches || []) : cross ? machine.crossFeeds : machine.feeds;
+    const bands=machine.feedBands?.filter(b=>rpm>=b.min&&rpm<=b.max)||[];
+    const steps = thread ? (machine.threadPitches || []) : machine.feedBands ? [...new Set(bands.flatMap(b=>b.feeds.map(f=>cross?f/2:f)))] : cross ? machine.crossFeeds : machine.feeds;
     if (thread) {
       if (steps.length && !steps.includes(target)) throw new CalculationError('Указанный шаг резьбы отсутствует в подтверждённом списке коробки.');
       feedRev = target;
@@ -88,6 +92,7 @@ export function calculate(input, machine) {
     } else if (steps.length) {
       feedRev = selectStep(target, steps);
       source = cross ? 'Механическая поперечная подача' : 'Механическая продольная подача';
+      if(bands.length){const band=bands.find(b=>b.feeds.includes(cross?feedRev*2:feedRev));source+=` · множитель шага ×${band.multiplier}`;if(band.multiplier!==1)warnings.push(`Для выбранной подачи настройте звено увеличения шага ×${band.multiplier}; диапазон шпинделя ${band.min}–${band.max} об/мин. Сверьте рукоятки по таблице станка.`);}
     } else {
       feedRev = target;
       source = 'Целевая подача; ступень не подтверждена';
@@ -103,7 +108,7 @@ export function calculate(input, machine) {
   for(const value of [theoretical,rpm,feedRev,feedMinute,targetFeedMinute,cuttingSpeed(rpm,d)])if(!Number.isFinite(value)||value<=0)throw new CalculationError('Параметры приводят к недопустимому числовому результату. Проверьте порядок величин и единицы.');
   return {kind, theoreticalRPM:theoretical, rpm, vc:cuttingSpeed(rpm,d), feedRev, feedMinute, feedTooth,
     targetFeedMinute, depth:ap, source, warnings,
-    provisional: !machine.rpm.length || (kind==='milling' ? !machine.feeds.length : thread ? !machine.threadPitches?.length : ['facing','groove','parting'].includes(input.operation) ? !machine.crossFeeds.length : !machine.feeds.length)};
+    provisional: (machine.id==='6t80' && machine.referenceVersion===2 && input.feedAxis!=='vertical' && feedMinute===325) || !machine.rpm.length || (kind==='milling' ? !(input.feedAxis==='vertical' ? machine.verticalFeeds?.length : machine.feeds.length) : thread ? !machine.threadPitches?.length : ['facing','groove','parting'].includes(input.operation) ? !machine.crossFeeds.length : !machine.feeds.length)};
 }
 export function findRecommendation(rules, input) {
   return rules.find(r=> r.kind===input.kind && r.material===input.material && r.toolMaterial===input.toolMaterial && r.operation===input.operation && r.finish===input.finish && r.toolType===input.toolType);
